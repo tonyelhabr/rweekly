@@ -33,6 +33,23 @@ library("temisc")
 library("tetext")
 ```
 
+```{r define_params}
+params <-
+  list(
+    color_main = "#7EC0EE"
+  )
+```
+
+```{r import_posts_info, echo = FALSE}
+# NOTE: Probably don't need to re-import `posts` for analything
+# filepath_posts <- file.path("data", "posts-rweekly.rds")
+# saveRDS(posts, filepath_posts)
+# posts_info <- readRDS(filepath_posts)
+filepath_posts_info <- file.path("data", "posts_info-rweekly.csv")
+# readr::write_csv(posts_info, filepath_posts_info)
+posts_info <- readr::read_csv(filepath_posts_info)
+# names(posts_info) <- c("name", "path")
+```
 
 ```{r posts_info, eval = FALSE}
 # Rerference:
@@ -55,23 +72,16 @@ posts_info <-
   )
 ```
 
-```{r import_posts_info, echo = FALSE}
-# NOTE: Probably don't need to re-import `posts` for analything
-# filepath_posts <- file.path("data", "posts-rweekly.rds")
-# saveRDS(posts, filepath_posts)
-# posts_info <- readRDS(filepath_posts)
-filepath_posts_info <- file.path("data", "posts_info-rweekly.csv")
-# readr::write_csv(posts_info, filepath_posts_info)
-posts_info <- readr::read_csv(filepath_posts_info)
-names(posts_info) <- c("name", "path")
+```{r import_data, echo = FALSE}
+filepath_data <- file.path("data", "data-rweekly.csv")
+# readr::write_csv(data, filepath_data)
+data <- readr::read_csv(filepath_data)
 ```
 
 ```{r get_rweekly_post_data, eval = FALSE}
 get_rweekly_post_data <-
   function(filepath) {
-    # Debugging...
-    # path <- posts[[1]]$path
-    
+    # NOTE: This would be necessary if downloading directly from the repo.
     # filepath <-
     #   gh::gh(
     #     "/repos/:owner/:repo/contents/:path",
@@ -91,7 +101,6 @@ get_rweekly_post_data <-
     rgx_head <- "(?<=\\#\\s).*$"
     
     lines <- readLines(filepath)
-    # browser()
     lines_proc <-
       lines %>%
       # base64enc::base64decode() %>%
@@ -139,7 +148,7 @@ get_rweekly_post_data <-
 
 convert_name_to_date <- function(x) {
   x %>% 
-    stringr::str_extract("[0-9]{4}-[0-9]{2}-[0-9]{2}") %>% 
+    stringr::str_extract("[0-9]{4}-[0-9]+-[0-9]+") %>% 
     strftime("%Y-%m-%d") %>% 
     lubridate::ymd()
 }
@@ -150,22 +159,51 @@ data <-
   tidyr::nest(path, .key = "path") %>% 
   mutate(data = purrr::map(path, get_rweekly_post_data)) %>% 
   select(-path) %>% 
-  tidyr::unnest(data) %>% 
-  # mutate(date = lubridate::ymd(strftime(stringr::str_extract(name, "[0-9]{4}-[0-9]{2}-[0-9]{2}"), "%Y-%m-%d"))) %>% 
+  tidyr::unnest(data)
+
+data <-
+  data %>% 
   mutate(date = convert_name_to_date(name)) %>% 
-  select(date, everything())
+  mutate(
+    yyyy = lubridate::year(date) %>% as.integer(),
+    mm = lubridate::month(date, label = TRUE),
+    wd = lubridate::wday(date, label = TRUE)
+  ) %>% 
+  select(date, yyyy, mm, wd, everything())
 data
+
+data %>% arrange(desc(date))
 ```
 
-```{r import_data, echo = FALSE}
-filepath_data <- file.path("data", "data-rweekly.csv")
-# readr::write_csv(data, filepath_data)
-data <- readr::read_csv(filepath_data)
+```{r explore_time}
+lab_subtitle_all <-
+  paste0(
+    "From ",
+    strftime(data$date[1], "%Y-%m-%d"),
+    " to ",
+    strftime(rev(data$date)[1], "%Y-%m-%d")
+  )
+
+viz_time_all <-
+  visualize_time_at(
+    data = data,
+    timebin = "date",
+    geom = "hist",
+    color = "cornflowerblue",
+    lab_subtitle = lab_subtitle_all
+  )
+viz_time_all
 ```
 
 ```{r explore_1}
-rgx_ignore <- "http|https|href|class|br|rweekly"
-
+rgx_ignore <-
+  paste0(
+  "http|https|href|class|br|rweekly|",
+  "en|lang|src|weekly|post|hashtag|",
+  "(t.co)|image|(twitter.com)|(github.com)|",
+  "hash|mdash|text|html|ltr|dir|hostname|_blank"
+  )
+  
 unigrams <-
   data %>%
   tetext::tidify_to_unigrams_at(
@@ -184,7 +222,7 @@ viz_unigrams_cnts <-
   unigrams %>% 
   tetext::visualize_cnts_at(
     word = "word",
-    num_top = 30
+    num_top = 20
   )
 viz_unigrams_cnts
 viz_bigrams_cnts <-
@@ -212,16 +250,8 @@ viz_unigrams_corrs <-
   tetext::visualize_corrs_network(
     feature = "feature"
   )
-viz_bigrams_corrs
+viz_unigrams_corrs
 ```
 
-```{r explore_time}
-viz_time_all <-
-  visualize_time_at(
-    data = data,
-    x = "text",
-    timebin = "timestamp",
-    geom = "hist",
-  )
-```
+
 
