@@ -23,15 +23,18 @@ knitr::opts_chunk$set(
 )
 ```
 
+
 ```{r packages}
 library("dplyr")
 library("stringr")
 library("gh")
 library("purrr")
+library("temisc")
+library("tetext")
 ```
 
 
-```{r posts_info, eval = FALSE, include = FALSE}
+```{r posts_info, eval = FALSE}
 # Rerference:
 # + https://itsalocke.com/blog/markdown-based-web-analytics-rectangle-your-blog/
 posts <-
@@ -42,6 +45,9 @@ posts <-
     path = "_posts"
   )
 
+# NOTE: Only do this to replicate the `posts` that were originally pulled.
+# posts <- posts[1:93]
+
 posts_info <-
   dplyr::data_frame(
     name = purrr::map_chr(posts, "name"),
@@ -49,17 +55,19 @@ posts_info <-
   )
 ```
 
-```{r eval = FALSE, include = FALSE}
-# filepath_data <- file.path("data", "posts-rweekly.rds")
-# saveRDS(posts_info, file = filepath_data)
-# posts_info <- readRDS(filepath_data)
-# filepath_data <- file.path("data", "posts-rweekly.csv")
-# readr::write_csv(posts_info, filepath_data)
-# posts_info <- readr::read_csv(filepath_data)
+```{r import_posts_info, echo = FALSE}
+# NOTE: Probably don't need to re-import `posts` for analything
+# filepath_posts <- file.path("data", "posts-rweekly.rds")
+# saveRDS(posts, filepath_posts)
+# posts_info <- readRDS(filepath_posts)
+filepath_posts_info <- file.path("data", "posts_info-rweekly.csv")
+# readr::write_csv(posts_info, filepath_posts_info)
+posts_info <- readr::read_csv(filepath_posts_info)
+names(posts_info) <- c("name", "path")
 ```
 
-```{r}
-get_rweekly_post_content <-
+```{r get_rweekly_post_data, eval = FALSE}
+get_rweekly_post_data <-
   function(filepath) {
     # Debugging...
     # path <- posts[[1]]$path
@@ -129,44 +137,49 @@ get_rweekly_post_content <-
     out
   }
 
-content <-
+convert_name_to_date <- function(x) {
+  x %>% 
+    stringr::str_extract("[0-9]{4}-[0-9]{2}-[0-9]{2}") %>% 
+    strftime("%Y-%m-%d") %>% 
+    lubridate::ymd()
+}
+
+data <-
   posts_info %>% 
-  # slice(1) %>% 
   transmute(num_post = row_number(), name, path) %>% 
   tidyr::nest(path, .key = "path") %>% 
-  mutate(content = purrr::map(path, get_rweekly_post_content)) %>% 
-  # tidyr::unnest(path) %>% 
+  mutate(data = purrr::map(path, get_rweekly_post_data)) %>% 
   select(-path) %>% 
-  tidyr::unnest(content)
-content
+  tidyr::unnest(data) %>% 
+  # mutate(date = lubridate::ymd(strftime(stringr::str_extract(name, "[0-9]{4}-[0-9]{2}-[0-9]{2}"), "%Y-%m-%d"))) %>% 
+  mutate(date = convert_name_to_date(name)) %>% 
+  select(date, everything())
+data
 ```
 
-```{r eval = FALSE, include = FALSE}
-# filepath_data <- file.path("data", "content-rweekly.rds")
-# saveRDS(content, file = filepath_data)
-# content <- readRDS(filepath_data)
-filepath_data <- file.path("data", "content-rweekly.csv")
-# readr::write_csv(content, filepath_data)
-content <- readr::read_csv(filepath_data)
+```{r import_data, echo = FALSE}
+filepath_data <- file.path("data", "data-rweekly.csv")
+# readr::write_csv(data, filepath_data)
+data <- readr::read_csv(filepath_data)
 ```
 
-```{r}
+```{r explore_1}
 rgx_ignore <- "http|https|href|class|br|rweekly"
 
 unigrams <-
-  content %>%
+  data %>%
   tetext::tidify_to_unigrams_at(
     text = "text",
     rgx_ignore = rgx_ignore
   )
 
 bigrams <-
-  content %>%
+  data %>%
   tetext::tidify_to_bigrams_at(
     text = "text",
     rgx_ignore = rgx_ignore
   )
-bigrams
+
 viz_unigrams_cnts <-
   unigrams %>% 
   tetext::visualize_cnts_at(
@@ -174,6 +187,41 @@ viz_unigrams_cnts <-
     num_top = 30
   )
 viz_unigrams_cnts
+viz_bigrams_cnts <-
+  bigrams %>% 
+  tetext::visualize_cnts_at(
+    word = "word",
+    num_top = 30
+  )
+viz_bigrams_cnts
+
+unigram_corrs <-
+  unigrams %>%
+  tetext::compute_corrs_at(
+    word = "word",
+    feature = "name",
+    num_top_ngrams = 100,
+    num_top_corrs = 100
+  )
+unigram_corrs
+unigram_corrs %>% arrange(desc(rank))
+
+viz_unigrams_corrs <-
+  unigrams %>%
+  rename(feature = name) %>% 
+  tetext::visualize_corrs_network(
+    feature = "feature"
+  )
+viz_bigrams_corrs
 ```
 
+```{r explore_time}
+viz_time_all <-
+  visualize_time_at(
+    data = data,
+    x = "text",
+    timebin = "timestamp",
+    geom = "hist",
+  )
+```
 
