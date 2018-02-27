@@ -29,6 +29,7 @@ library("dplyr")
 library("stringr")
 library("gh")
 library("purrr")
+library("ggplot2")
 library("temisc")
 library("tetext")
 ```
@@ -36,21 +37,11 @@ library("tetext")
 ```{r define_params}
 params <-
   list(
-    color_main = "#7EC0EE"
+    color_main = "skyblue",
+    # colors_main = temisc::colors_te
+    colors_main = c("blue", "red", "green", "orange", "purple", "brown")
   )
 ```
-
-```{r import_posts_info, echo = FALSE}
-# NOTE: Probably don't need to re-import `posts` for analything
-# filepath_posts <- file.path("data", "posts-rweekly.rds")
-# saveRDS(posts, filepath_posts)
-# posts_info <- readRDS(filepath_posts)
-filepath_posts_info <- file.path("data", "posts_info-rweekly.csv")
-# readr::write_csv(posts_info, filepath_posts_info)
-posts_info <- readr::read_csv(filepath_posts_info)
-# names(posts_info) <- c("name", "path")
-```
-
 ```{r posts_info, eval = FALSE}
 # Rerference:
 # + https://itsalocke.com/blog/markdown-based-web-analytics-rectangle-your-blog/
@@ -72,10 +63,60 @@ posts_info <-
   )
 ```
 
-```{r import_data, echo = FALSE}
-filepath_data <- file.path("data", "data-rweekly.csv")
-# readr::write_csv(data, filepath_data)
-data <- readr::read_csv(filepath_data)
+
+```{r posts_info_proc}
+convert_name_to_date <- function(x) {
+  x %>% 
+    stringr::str_extract("[0-9]{4}-[0-9]+-[0-9]+") %>% 
+    strftime("%Y-%m-%d") %>% 
+    lubridate::ymd()
+}
+
+posts_info <-
+  posts_info %>% 
+  mutate(date = convert_name_to_date(name)) %>% 
+  mutate(num_post = row_number(date)) %>% 
+    mutate(
+    yyyy = lubridate::year(date) %>% as.integer(),
+    mm = lubridate::month(date, label = TRUE),
+    wd = lubridate::wday(date, label = TRUE)
+  ) %>% 
+  select(date, yyyy, mm, wd, num_post, everything())
+
+posts_info <-
+  posts_info %>% 
+  mutate(date_min = min(date), date_max = max(date)) %>% 
+  mutate(date_lag = date - date_min) %>% 
+  mutate(date_lag30 = as.integer(round(date_lag / 30, 0))) %>% 
+  mutate(date_ntile = ntile(date, 6)) %>% 
+  select(-date_min, -date_max) %>% 
+  select(date_lag, date_lag30, date_ntile, everything())
+
+posts_info
+```
+
+
+```{r import_posts_info, echo = FALSE}
+# NOTE: Probably don't need to re-import `posts` for analything
+# filepath_posts <- file.path("data", "posts-rweekly.rds")
+# saveRDS(posts, filepath_posts)
+# posts_info <- readRDS(filepath_posts)
+filepath_posts_info <- file.path("data", "posts_info-rweekly.csv")
+# readr::write_csv(posts_info, filepath_posts_info)
+posts_info <- readr::read_csv(filepath_posts_info)
+# names(posts_info) <- c("name", "path")
+```
+
+```{r explore_time}
+viz_time_lag30 <-
+  visualize_time_at(
+    data = posts_info,
+    timebin = "date_lag30",
+    geom = "bar",
+    color_value = params$color_main,
+    lab_subtitle = "By Year"
+  )
+viz_time_lag30
 ```
 
 ```{r get_rweekly_post_data, eval = FALSE}
@@ -92,10 +133,10 @@ get_rweekly_post_data <-
 
     filepath_prefix <- "data-raw"
     filepath <- file.path(filepath_prefix, filepath)
-    rgx_rmv <- "Å|â€|œ|\u009d"
+    rgx_rmv <- "Â|Å|â€|œ|\u009d"
     rgx_detect_link <- "^\\+\\s+\\["
     rgx_detect_head <- "^\\s*\\#"
-    rgx_link_post <- "(?<=\\[).*(?=\\])"
+    rgx_link_post <- "(?<=\\+\\s\\[).*(?=\\])"
     rgx_link_img <- "(?<=\\!\\[).*(?=\\])"
     rgx_url <- "(?<=\\().*(?=\\))"
     rgx_head <- "(?<=\\#\\s).*$"
@@ -112,6 +153,7 @@ get_rweekly_post_data <-
       transmute(line = row_number(), text) %>%
       filter(text != "") %>%
       mutate(text = stringr::str_replace_all(text, rgx_rmv, "")) %>%
+      mutate(text = stringr::str_replace_all(text, "&", "and")) %>% 
       mutate(
         is_link = ifelse(stringr::str_detect(text, rgx_detect_link), TRUE, FALSE),
         is_head = ifelse(stringr::str_detect(text, rgx_detect_head), TRUE, FALSE)
@@ -120,11 +162,16 @@ get_rweekly_post_data <-
         link_post = stringr::str_extract(text, rgx_link_post),
         link_img = stringr::str_extract(text, rgx_link_img),
         url = stringr::str_extract(text, rgx_url),
-        head = stringr::str_extract(text, rgx_head)
+        head = 
+          stringr::str_extract(text, rgx_head) %>% 
+          stringr::str_to_lower() %>% 
+          stringr::str_replace_all("s$", "") %>% 
+          stringr::str_replace_all(" the", "") %>% 
+          stringr::str_trim()
       ) %>%
       mutate(
         is_head = ifelse(line == 1, TRUE, is_head),
-        head = ifelse(line == 1, "YAML/Introduction", head)
+        head = ifelse(line == 1, "yaml and intro", head)
       )
 
     # NOTE: Couldn't seem to get `zoo::na.locf()` to work properly.
@@ -146,90 +193,153 @@ get_rweekly_post_data <-
     out
   }
 
-convert_name_to_date <- function(x) {
-  x %>% 
-    stringr::str_extract("[0-9]{4}-[0-9]+-[0-9]+") %>% 
-    strftime("%Y-%m-%d") %>% 
-    lubridate::ymd()
-}
-
 data <-
   posts_info %>% 
-  transmute(num_post = row_number(), name, path) %>% 
   tidyr::nest(path, .key = "path") %>% 
   mutate(data = purrr::map(path, get_rweekly_post_data)) %>% 
   select(-path) %>% 
   tidyr::unnest(data)
 
-data <-
-  data %>% 
-  mutate(date = convert_name_to_date(name)) %>% 
-  mutate(
-    yyyy = lubridate::year(date) %>% as.integer(),
-    mm = lubridate::month(date, label = TRUE),
-    wd = lubridate::wday(date, label = TRUE)
-  ) %>% 
-  select(date, yyyy, mm, wd, everything())
-data
+```
 
-data %>% arrange(desc(date))
+
+```{r import_data, echo = FALSE}
+filepath_data <- file.path("data", "data-rweekly.csv")
+# readr::write_csv(data, filepath_data)
+data <- readr::read_csv(filepath_data)
 ```
 
 ```{r explore_time}
-lab_subtitle_all <-
-  paste0(
-    "From ",
-    strftime(data$date[1], "%Y-%m-%d"),
-    " to ",
-    strftime(rev(data$date)[1], "%Y-%m-%d")
+metrics_bypost <-
+  data %>% 
+  group_by(name, date) %>% 
+  summarize(
+    num_lines = max(line),
+    num_links = sum(!is.na(is_link)),
+    num_links_post = sum(!is.na(link_post)),
+    num_links_img = sum(!is.na(link_img))
+    ) %>% 
+  ungroup() %>% 
+  arrange(desc(num_lines))
+
+viz_theme <-
+  temisc::theme_te_a_facet() +
+  theme(legend.position = "none")
+
+viz_labs <-
+  labs(
+    x = NULL,
+    y = NULL,
+    title = NULL,
+    subtitle = NULL,
+    caption = NULL
   )
 
-viz_time_all <-
-  visualize_time_at(
-    data = data,
-    timebin = "date",
-    geom = "hist",
-    color = "cornflowerblue",
-    lab_subtitle = lab_subtitle_all
-  )
-viz_time_all
+viz_lines_bypost <-
+  metrics_bypost %>%
+  tidyr::gather(metric, value, names(metrics_bypost) %>% stringr::str_subset("^num_li.*s$")) %>% 
+  mutate(metric = stringr::str_replace_all(metric, "num_", "")) %>% 
+  ggplot(aes(x = date, y = value, color = metric)) +
+  geom_line() +
+  geom_smooth(method = "lm", se = FALSE, size = 2) +
+  facet_wrap(~metric, scales = "free") +
+  scale_color_manual(values = params$colors_main[1:2]) +
+  viz_labs +
+  labs(title = "Trends Over Time") +
+  viz_theme
+viz_lines_bypost
 ```
 
-```{r explore_1}
-rgx_ignore <-
-  paste0(
-  "http|https|href|class|br|rweekly|",
-  "en|lang|src|weekly|post|hashtag|",
-  "(t.co)|image|(twitter.com)|(github.com)|",
-  "hash|mdash|text|html|ltr|dir|hostname|_blank"
-  )
+```{r}
+
+viz_lines_bypost <-
+  metrics_bypost %>%
+  tidyr::gather(metric, value, names(metrics_bypost) %>% stringr::str_subset("^num_links_")) %>% 
+  mutate(metric = stringr::str_replace_all(metric, "num_links_", "")) %>% 
+  ggplot(aes(x = date, y = value, color = metric)) +
+  geom_line() +
+  geom_smooth(method = "lm", se = FALSE, size = 2) +
+  facet_wrap(~metric, scales = "free") +
+  scale_color_manual(values = params$colors_main[3:4]) +
+  viz_labs +
+  labs(title = "Trends Over Time", subtitle = "Links") +
+  viz_theme
+viz_lines_bypost
+```
+
+```{r}
+head_rmv <- "yaml and intro"
+num_top_head <- 6L
+head_top <- 
+  data %>% 
+  count(head, sort = TRUE) %>% 
+  filter(!(head %in% head_rmv)) %>% 
+  # slice(1:num_top_head) %>% 
+  top_n(num_top_head, n) %>% 
+  pull(head)
+
+metrics_bypost_byhead <-
+  data %>% 
+  group_by(name, date, head) %>% 
+  summarize(
+    num_lines = n()
+    ) %>% 
+  ungroup() %>% 
+  arrange(desc(num_lines))
+
+viz_lines_bypost_byhead <-
+  metrics_bypost_byhead %>%
+  filter(head %in% head_top) %>% 
+  tidyr::gather(metric, value, "num_lines") %>% 
+  mutate(label = if_else(date == max(date), head, NA_character_)) %>%
+  ggplot(aes(x = date, y = value, color = head)) +
+  geom_line() +
+  geom_smooth(method = "loess", se = FALSE, size = 2) +
+  # ggrepel::geom_label_repel(aes(label = label), nudge_x = 1, na.rm = TRUE) +
+  scale_color_manual(values = params$colors_main[1:6]) +
+  viz_labs +
+  labs(title = sprintf("Count of Lines Per Post for Top %d Topics", num_top_head)) +
+  viz_theme +
+  theme(legend.position = "bottom")
+viz_lines_bypost_byhead
+```
+
+
+```{r explore_ngrams}
+rgx_ignore <- "http|https"
   
 unigrams <-
   data %>%
+  filter(!is.na(link_post)) %>% 
   tetext::tidify_to_unigrams_at(
-    text = "text",
+    text = "link_post",
     rgx_ignore = rgx_ignore
   )
 
 bigrams <-
   data %>%
+    filter(!is.na(link_post)) %>% 
   tetext::tidify_to_bigrams_at(
-    text = "text",
+    text = "link_post",
     rgx_ignore = rgx_ignore
   )
 
+num_top_ngrams <- 20
 viz_unigrams_cnts <-
   unigrams %>% 
   tetext::visualize_cnts_at(
     word = "word",
-    num_top = 20
+    num_top = num_top_ngrams,
+    color_value = params$color_main
   )
 viz_unigrams_cnts
+
 viz_bigrams_cnts <-
   bigrams %>% 
   tetext::visualize_cnts_at(
     word = "word",
-    num_top = 30
+    num_top = num_top_ngrams,
+    color_value = params$color_main
   )
 viz_bigrams_cnts
 
@@ -242,15 +352,77 @@ unigram_corrs <-
     num_top_corrs = 100
   )
 unigram_corrs
-unigram_corrs %>% arrange(desc(rank))
 
 viz_unigrams_corrs <-
   unigrams %>%
-  rename(feature = name) %>% 
   tetext::visualize_corrs_network(
-    feature = "feature"
-  )
+    feature = "name"
+  ) +
+  labs(title = "Network of Pariwise Correlations of Words within Posts")
 viz_unigrams_corrs
+```
+
+```{r}
+unigrams_tfidf <-
+  unigrams %>% 
+  compute_tfidf_at(
+    # doc = "date_ntile"
+    doc = "yyyy"
+  )
+unigrams_tfidf
+
+bigrams_tfidf <-
+  bigrams %>% 
+  compute_tfidf_at(
+    # doc = "date_ntile"
+    doc = "yyyy"
+  )
+bigrams_tfidf
+
+num_top_tfidf <- 3
+viz_unigrams_tfidf_multi <-
+  unigrams %>% 
+  visualize_tfidf_at(
+    # doc = "date_ntile",
+    doc = "yyyy",
+    num_top = num_top_tfidf,
+    color_value = params$colors_main,
+    # lab_subtitle = "By N-Tile"
+    lab_subtitle = "By Year"
+  )
+viz_unigrams_tfidf_multi
+
+viz_bigrams_tfidf_multi <-
+  bigrams %>% 
+  visualize_tfidf_at(
+    # doc = "date_ntile",
+    doc = "yyyy",
+    num_top = num_top_tfidf,
+    color_value = params$colors_main,
+    # lab_subtitle = "By N-Tile"
+    lab_subtitle = "By Year"
+  )
+viz_bigrams_tfidf_multi
+```
+
+
+```{r}
+unigrams_change <-
+  unigrams %>% 
+  compute_change_at(
+    timebin = "date",
+    timefloor = "month"
+  )
+# unigrams_change
+viz_unigrams_change <-
+  unigrams %>% 
+  visualize_change_at(
+    timebin = "date",
+    timefloor = "month",
+    color_value = params$colors_main
+  ) +
+  theme(legend.position = "bottom")
+viz_unigrams_change
 ```
 
 
