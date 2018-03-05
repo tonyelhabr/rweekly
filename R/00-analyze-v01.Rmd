@@ -2,7 +2,7 @@
 author: ""
 date: ""
 output:
-  html_document::
+  html_document:
     toc: false
 ---
 
@@ -23,25 +23,69 @@ knitr::opts_chunk$set(
 )
 ```
 
+I'm always intrigued by data science "meta" analyses or programming/data-science.
+For example,
+[Matt Dancho's analysis of renown data scientist David Robinson](http://www.business-science.io/learning-r/2018/03/03/how_to_learn_R_pt1.html).
+[David Robinson](http://varianceexplained.org/) himself has done some good ones, such as 
+[his blog posts for _Stack Overflow_ highlighting the growth of "incredible" growth of `python`](https://stackoverflow.blog/2017/09/06/incredible-growth-python/), 
+and [the "impressive" growth of `R`](https://stackoverflow.blog/2017/10/10/impressive-growth-r/)
+in modern times.
+
+With that in mind, 
+I thought it would try to identify if any interesting trends have risen/fallen _within_
+the `R` community in recent years. To do this, I scraped and analyzed
+the "weekly roundup" posts put together by 
+[_R Weekly_](https://rweekly.org/), which was originated in May 2016. These posts consist of links and corresponding
+descriptions, grouped together by topic.
+It should go without saying that this content serves as a reasonable heuristic
+for the interests of the `R` community at any one point in time.
+(Of course, the posts of other aggregate R blogs
+such as [R Bloggers](https://www.r-bloggers.com/) or [Revolution Analytics](http://blog.revolutionanalytics.com/)
+might serve as better resources since they post more frequently and have
+been around for quite a bit longer than [_R Weekly_](https://rweekly.org/).)
+
+## Scraping and Cleaning
+
+As always, it's good to follow the best practice of importing all needed packages
+before beginning. Notably, I'm testing out a personal package (`tetext`) that I'm currently
+developing to facilitate some of the text analysis actions demonstrated in the
+[_Tidy Text Mining with R_ book](https://www.tidytextmining.com/).
+Looking into the future, it's my hope
+that I can use this package to quickly analyze any kind of text-based data in
+a concise and understandable manner. [^fn_tetext]
+
+[^fn_tetext]:
+Who knows, if it's good enough, maybe I'll even
+make an attempt to make it available on [CRAN](https://cran.r-project.org/).
 
 ```{r packages}
 library("dplyr")
+library("rlang")
 library("stringr")
+library("lubridate")
 library("gh")
 library("purrr")
 library("ggplot2")
-library("temisc")
-library("tetext")
+library("viridisLite")
+library("tetext") # Personal package.
 ```
 
-```{r define_params}
-params <-
-  list(
-    color_main = "skyblue",
-    # colors_main = temisc::colors_te
-    colors_main = c("blue", "red", "green", "orange", "purple", "brown")
-  )
+For the scraping, I drew upon some the principles shown by
+[Maelle Salmon](http://www.masalmon.eu/)
+in [her write-up](https://itsalocke.com/blog/markdown-based-web-analytics-rectangle-your-blog/)
+detailing how she scraped and cleaned
+the blog posts of the [Locke Data blog](https://itsalocke.com/blog). [^fn_scrape]
+
+[^fn_scrape]:
+Actually, I downloaded the data locally so that I would not have to worry about GitHub
+API request limits. Thus, in addition to other custom processing steps that I added,
+my final code does not necessarily resemble hers.
+
+```{r import_posts_info, echo = FALSE}
+filepath_posts_info <- file.path("data", "posts_info-rweekly.csv")
+posts_info <- readr::read_csv(filepath_posts_info)
 ```
+
 ```{r posts_info, eval = FALSE}
 # Rerference:
 # + https://itsalocke.com/blog/markdown-based-web-analytics-rectangle-your-blog/
@@ -63,8 +107,16 @@ posts_info <-
   )
 ```
 
+In all, [_R Weekly_](https://rweekly.org/) has made `r nrow(posts_info)` (at the time of writing).
 
-```{r posts_info_proc}
+Next, before parsing the text of the posts, I add some "meta-data" (mostly for
+dates) that is helpful
+for subsequent exploration and analysis. [^fn_post_metadata]
+
+[^fn_post_metadata]:
+(I didn't end up actually using all of the added columns here.)
+
+```{r posts_info_proc, eval = FALSE}
 convert_name_to_date <- function(x) {
   x %>% 
     stringr::str_extract("[0-9]{4}-[0-9]+-[0-9]+") %>% 
@@ -87,36 +139,48 @@ posts_info <-
   posts_info %>% 
   mutate(date_min = min(date), date_max = max(date)) %>% 
   mutate(date_lag = date - date_min) %>% 
-  mutate(date_lag30 = as.integer(round(date_lag / 30, 0))) %>% 
-  mutate(date_ntile = ntile(date, 6)) %>% 
+  mutate(date_lag30 = as.integer(round(date_lag / 30, 0)), 
+         date_lag60 = as.integer(round(date_lag / 60, 0)), 
+         date_ntile = ntile(date, 6)) %>% 
   select(-date_min, -date_max) %>% 
-  select(date_lag, date_lag30, date_ntile, everything())
-
+  select(date_lag, date_lag30, date_lag60, date_ntile, everything())
 posts_info
 ```
 
-
-```{r import_posts_info, echo = FALSE}
-# NOTE: Probably don't need to re-import `posts` for analything
-# filepath_posts <- file.path("data", "posts-rweekly.rds")
-# saveRDS(posts, filepath_posts)
-# posts_info <- readRDS(filepath_posts)
-filepath_posts_info <- file.path("data", "posts_info-rweekly.csv")
+```{r export_posts_info, echo = FALSE}
 # readr::write_csv(posts_info, filepath_posts_info)
-posts_info <- readr::read_csv(filepath_posts_info)
-# names(posts_info) <- c("name", "path")
 ```
 
-```{r explore_time}
+Let's quickly look at whether or not [R Weekly](https://rweekly.org/)
+has been consistent with its posting frequency since its inception (using a function from my `tetext` package).
+The number of posts across 30-day windows should be around 4 or 5.
+
+```{r explore_time, echo = FALSE, fig.width = 8, fig.height = 5}
+lab_subtitle <-
+  sprintf(
+    "%s - %s",
+    strftime(as.character(min(posts_info$date)), "%Y-%m-%d"),
+    strftime(as.character(max(posts_info$date)), "%Y-%m-%d")
+  )
+
 viz_time_lag30 <-
-  visualize_time_at(
+  tetext::visualize_time_at(
     data = posts_info,
     timebin = "date_lag30",
-    geom = "bar",
-    color_value = params$color_main,
-    lab_subtitle = "By Year"
-  )
+    color_value = "grey50"
+  ) +
+  labs(title = "Count of R Weekly Posts Per 30-Day Window",
+       subtitle = lab_subtitle)
 viz_time_lag30
+```
+
+Now, I'll do the dirty work of cleaning and parsing the text of each post.
+My function for doing so is not particularly robust, so it would need to be modified
+if being applied to another data set/GitHub repo.
+
+```{r import_data, echo = FALSE}
+filepath_data <- file.path("data", "data-rweekly.csv")
+data <- readr::read_csv(filepath_data)
 ```
 
 ```{r get_rweekly_post_data, eval = FALSE}
@@ -144,6 +208,7 @@ get_rweekly_post_data <-
     lines <- readLines(filepath)
     lines_proc <-
       lines %>%
+      # NOTE: This would be necessary if downloading directly from the repo.
       # base64enc::base64decode() %>%
       # rawToChar() %>%
       stringr::str_split("\n") %>%
@@ -200,16 +265,20 @@ data <-
   select(-path) %>% 
   tidyr::unnest(data)
 
+data
 ```
 
-
-```{r import_data, echo = FALSE}
-filepath_data <- file.path("data", "data-rweekly.csv")
+```{r export_data, echo = FALSE}
 # readr::write_csv(data, filepath_data)
-data <- readr::read_csv(filepath_data)
 ```
 
-```{r explore_time}
+## Analyzing
+
+### Lines and Links
+
+Now, with the data in a workable format, let's do some exploration of the post content itself.
+
+```{r metrics_bypost}
 metrics_bypost <-
   data %>% 
   group_by(name, date) %>% 
@@ -218,15 +287,23 @@ metrics_bypost <-
     num_links = sum(!is.na(is_link)),
     num_links_post = sum(!is.na(link_post)),
     num_links_img = sum(!is.na(link_img))
-    ) %>% 
+  ) %>% 
   ungroup() %>% 
   arrange(desc(num_lines))
+```
 
-viz_theme <-
-  temisc::theme_te_a_facet() +
+Have the number of links per post increased over time?
+
+```{r viz_metrics_cnt_bypost, echo = FALSE, fig.width = 8, fig.height = 5}
+viz_theme_single <-
+  teplot::theme_te_facet() +
+  theme(legend.position = "bottom")
+
+viz_theme_facet <-
+  teplot::theme_te_facet() +
   theme(legend.position = "none")
 
-viz_labs <-
+viz_labs_base <-
   labs(
     x = NULL,
     y = NULL,
@@ -235,41 +312,74 @@ viz_labs <-
     caption = NULL
   )
 
-viz_lines_bypost <-
+viz_metrics_cnt_bypost <-
   metrics_bypost %>%
-  tidyr::gather(metric, value, names(metrics_bypost) %>% stringr::str_subset("^num_li.*s$")) %>% 
+  tidyr::gather(metric, value, names(.) %>% stringr::str_subset("^num_li.*s$")) %>% 
   mutate(metric = stringr::str_replace_all(metric, "num_", "")) %>% 
   ggplot(aes(x = date, y = value, color = metric)) +
-  geom_line() +
+  geom_line(linetype = "dashed", size = 1) +
   geom_smooth(method = "lm", se = FALSE, size = 2) +
   facet_wrap(~metric, scales = "free") +
-  scale_color_manual(values = params$colors_main[1:2]) +
-  viz_labs +
-  labs(title = "Trends Over Time") +
-  viz_theme
-viz_lines_bypost
+  scale_color_manual(values = c("red", "blue")) +
+  viz_labs_base +
+  labs(title = "Count of R Weekly Post Lines and Links Over Time") +
+  viz_theme_facet
+viz_metrics_cnt_bypost
 ```
 
-```{r}
+It looks like there has been a correlated increase in the overall length of the posts
+(as determined by non-empty lines) and the number of links in each post.
 
-viz_lines_bypost <-
+```{r model_metrics_bypost}
+corrr::correlate(metrics_bypost %>% select(num_lines, num_links))
+broom::tidy(lm(num_lines ~ num_links, data = metrics_bypost))
+```
+
+Let's break down the increase of the number of links over time.
+Are there more links simply due to an increased use of images?
+
+```{r viz_links_cnt_bypost, echo = FALSE, fig.width = 8, fig.height = 5}
+viz_links_cnt_bypost <-
   metrics_bypost %>%
   tidyr::gather(metric, value, names(metrics_bypost) %>% stringr::str_subset("^num_links_")) %>% 
   mutate(metric = stringr::str_replace_all(metric, "num_links_", "")) %>% 
   ggplot(aes(x = date, y = value, color = metric)) +
-  geom_line() +
+  geom_line(linetype = "dashed", size = 1) +
   geom_smooth(method = "lm", se = FALSE, size = 2) +
   facet_wrap(~metric, scales = "free") +
-  scale_color_manual(values = params$colors_main[3:4]) +
-  viz_labs +
-  labs(title = "Trends Over Time", subtitle = "Links") +
-  viz_theme
-viz_lines_bypost
+  scale_color_manual(values = c("skyblue", "navyblue")) +
+  viz_labs_base +
+  labs(title = "Count of R Weekly Post Links Over Time",
+       subtitle = "By Type of Link") +
+  viz_theme_facet
+viz_links_cnt_bypost
 ```
 
-```{r}
+It is evident that the increase in the number of links is not the result
+of increased image usage, but, instead, to increased linkage to non-trivial content.
+
+```{r model_metrics_bypost_2}
+corrr::correlate(metrics_bypost %>% select(num_links, num_links_img, num_links_post))
+broom::tidy(lm(num_links ~ num_links_img + num_links_post, data = metrics_bypost))
+```
+
+[R Weekly](https://rweekly.org/) uses a fairly consistent set of "topics" 
+(corresponding to the `head` variable in 
+the scraped data) across all of their posts.
+
+```{r head_cnt}
 head_rmv <- "yaml and intro"
-num_top_head <- 6L
+data %>%
+  distinct(head, name) %>%
+  filter(!(head %in% head_rmv)) %>% 
+  count(head, sort = TRUE)
+```
+
+Is there a certain topic (or topics) in the RWeekly posts that are causing the
+increased length of posts?
+
+```{r viz_lines_cnt_bypost_byhead, echo = FALSE, fig.width = 8, fig.height = 5}
+num_top_head <- 5L
 head_top <- 
   data %>% 
   count(head, sort = TRUE) %>% 
@@ -281,13 +391,11 @@ head_top <-
 metrics_bypost_byhead <-
   data %>% 
   group_by(name, date, head) %>% 
-  summarize(
-    num_lines = n()
-    ) %>% 
+  summarize(num_lines = n()) %>% 
   ungroup() %>% 
   arrange(desc(num_lines))
 
-viz_lines_bypost_byhead <-
+viz_lines_cnt_bypost_byhead <-
   metrics_bypost_byhead %>%
   filter(head %in% head_top) %>% 
   tidyr::gather(metric, value, "num_lines") %>% 
@@ -296,16 +404,26 @@ viz_lines_bypost_byhead <-
   geom_line() +
   geom_smooth(method = "loess", se = FALSE, size = 2) +
   # ggrepel::geom_label_repel(aes(label = label), nudge_x = 1, na.rm = TRUE) +
-  scale_color_manual(values = params$colors_main[1:6]) +
-  viz_labs +
-  labs(title = sprintf("Count of Lines Per Post for Top %d Topics", num_top_head)) +
-  viz_theme +
-  theme(legend.position = "bottom")
-viz_lines_bypost_byhead
+  scale_color_manual(values = c("red", "green", "blue", "orange", "purple")) +
+  viz_labs_base +
+  labs(title = sprintf("Count of Lines Per R Weekly Post for Top %d Most Common Headers", num_top_head)) +
+  viz_theme_single
+viz_lines_cnt_bypost_byhead
 ```
 
+The steady increase in the length of the `tutorial` section stands out.
+(I suppose the `R` community really enjoys code-walkthroughs (like this one).)
+Also, the introduction of the `new package` header about a year after the first RWeekly post
+suggests that R developers really care about what their fellow community members are working on.
 
-```{r explore_ngrams}
+### Words
+
+The words used in the short descriptions that accompany each link
+to external content should provide a more focused perspective on what
+specifically is of interest in the `R` community.
+What are the most frequently used words in these short descriptions?
+
+```{r viz_unigrams_cnts, echo = FALSE}
 rgx_ignore <- "http|https"
   
 unigrams <-
@@ -316,33 +434,58 @@ unigrams <-
     rgx_ignore = rgx_ignore
   )
 
-bigrams <-
-  data %>%
-    filter(!is.na(link_post)) %>% 
-  tetext::tidify_to_bigrams_at(
-    text = "link_post",
-    rgx_ignore = rgx_ignore
-  )
-
 num_top_ngrams <- 20
 viz_unigrams_cnts <-
   unigrams %>% 
   tetext::visualize_cnts_at(
     word = "word",
     num_top = num_top_ngrams,
-    color_value = params$color_main
-  )
+    color_value = "grey50"
+  ) +
+  labs(title = "Most Frequently Used Words in R Weekly Link Descriptions")
 viz_unigrams_cnts
+```
 
-viz_bigrams_cnts <-
-  bigrams %>% 
-  tetext::visualize_cnts_at(
+Some unsurprising words appear at the top of this list, such as `data` and `analysis`.
+Some words that one would probably not see among the top of an analogous list
+for another programming community
+are  `rstudio`, `shiny`, `ggplot2`, and `tidy`. It's interesting that `shiny` actually
+appears as the top individual package--this could indicate that bloggers like to
+share their content through interactive apps (presumably because it is a great way
+to captivate and engage an audience).
+
+It's one thing to look at individual words, but it is perhaps more interesting
+to look at word relationships. 
+
+
+```{r viz_unigrams_corrs, echo = FALSE, fig.width = 10, fig.height = 6}
+num_top_ngrams <- 100
+num_top_corrs <- 100
+viz_unigrams_corrs <-
+  unigrams %>%
+  tetext::visualize_corrs_network(
     word = "word",
-    num_top = num_top_ngrams,
-    color_value = params$color_main
-  )
-viz_bigrams_cnts
+    feature = "name",
+    num_top_ngrams = num_top_ngrams,
+    num_top_corrs = num_top_corrs
+  ) +
+  labs(title = "Network of Pairwise Correlations of Words in R Weekly Link Descriptions")
+viz_unigrams_corrs
+```
 
+This visual highlights a lot of the pairwise word correlations that we might expect
+in the data science realm: `data` and `science`, `time` and `series`, `machine` and `learning`, etc.
+Nonetheless, there are some that are certainly unique to the `R` community:
+`purrr` with `mapping`; `community` with `building`; `shiny` with `interactive` and `learning`; and
+`rstudio` with (`microsoft`) `server`.
+
+The numerical values driving this correlation network not only is useful for quantifying
+the visual relationships, but, in this case, it actually highlights some relationships
+that get a bit lost in the graph (simply due to clustering). In particular, the prominence
+of the words `tutorial`, `conf`, `user`, and `interactive` stand out.
+
+
+```{r unigrams_corrs}
 unigram_corrs <-
   unigrams %>%
   tetext::compute_corrs_at(
@@ -351,79 +494,132 @@ unigram_corrs <-
     num_top_ngrams = 100,
     num_top_corrs = 100
   )
-unigram_corrs
-
-viz_unigrams_corrs <-
-  unigrams %>%
-  tetext::visualize_corrs_network(
-    feature = "name"
-  ) +
-  labs(title = "Network of Pariwise Correlations of Words within Posts")
-viz_unigrams_corrs
+unigram_corrs %>% head(20)
 ```
 
-```{r}
+### Most Unique Words
+
+Let's try to identify words that have risen and fallen in popularity.
+While there are many ways of doing, let's try segmenting
+the [R Weekly](https://rweekly.org/) posts into intervals of 60 days and computing the 
+[term-frequency, inverse-document-frequency]((https://www.tidytextmining.com/tfidf.html)) (TF-IDF)
+of words across these intervals.
+
+```{r unigrams_tfidf, echo = FALSE, fig.width = 10, fig.height = 8}
 unigrams_tfidf <-
   unigrams %>% 
-  compute_tfidf_at(
-    # doc = "date_ntile"
-    doc = "yyyy"
+  rename(doc = date_lag60) %>% 
+  tetext::compute_tfidf_at(
+    word = "word",
+    doc = "doc"
   )
-unigrams_tfidf
+docs <- unigrams_tfidf %>% distinct(doc) %>% pull(doc)
 
-bigrams_tfidf <-
-  bigrams %>% 
-  compute_tfidf_at(
-    # doc = "date_ntile"
-    doc = "yyyy"
-  )
-bigrams_tfidf
+num_top_tfidf <- 5
 
-num_top_tfidf <- 3
+create_doc_col <- function(data, col, date) {
+  col_quo <- rlang::sym(col)
+  date_quo <- rlang::sym(date)
+  data %>%
+    mutate(doc = !!col_quo) %>% 
+    group_by(!!col_quo) %>% 
+    mutate(doc = 
+             sprintf(
+               "%s - %s",
+               strftime(as.character(min(!!date_quo)), "%Y-%m-%d"),
+               strftime(as.character(max(!!date_quo)), "%Y-%m-%d")
+             )
+    ) %>% 
+    ungroup()
+}
+
+# color_value <- viridisLite::cividis(n = length(docs))
+color_value <- RColorBrewer::brewer.pal(length(docs), "Paired")
+
 viz_unigrams_tfidf_multi <-
   unigrams %>% 
-  visualize_tfidf_at(
-    # doc = "date_ntile",
-    doc = "yyyy",
+  create_doc_col("date_lag60", "date") %>% 
+  tetext::visualize_tfidf_at(
+    word = "word",
+    doc = "doc",
     num_top = num_top_tfidf,
-    color_value = params$colors_main,
-    # lab_subtitle = "By N-Tile"
-    lab_subtitle = "By Year"
-  )
+    color = "doc",
+    color_value = color_value
+  ) +
+  labs(title = "Top 5 Highest TF-IDF Words in R Weekly Link Descriptions",
+       subtitle = "Across 60-Day Intervals")
 viz_unigrams_tfidf_multi
-
-viz_bigrams_tfidf_multi <-
-  bigrams %>% 
-  visualize_tfidf_at(
-    # doc = "date_ntile",
-    doc = "yyyy",
-    num_top = num_top_tfidf,
-    color_value = params$colors_main,
-    # lab_subtitle = "By N-Tile"
-    lab_subtitle = "By Year"
-  )
-viz_bigrams_tfidf_multi
 ```
 
+A couple of things stand out:
 
-```{r}
++ Posts were heavily influenced by [`user2016` conference](http://user2016.r-project.org/) content in the early days 
+of [_R Weekly_](https://rweekly.org/) (light blue and blue)
++ There was clearly a `20` theme in the 60 days between 2017-02-20 and 2017-04-10 (red).
++ The ["tabs vs. spaces"](https://softwareengineering.stackexchange.com/questions/57/tabs-versus-spaces-what-is-the-proper-indentation-character-for-everything-in-e)
+debate rose to prominence during the late summer days of 2017 (orange), presumably after
+[David Robinson's _Stack Overflow_ post on the topic](https://stackoverflow.blog/2017/06/15/developers-use-spaces-make-money-use-tabs/).
++  R's ongoing global influence is apparent with the appearance of 
+`euro` with the [`user2016` conference](http://user2016.r-project.org/) (light blue and blue); 
+`poland` and
+`satrdays` (presumably due to the [Cape Town R conference of the namesake](https://capetown2018.satrdays.org/)
+in late 2016 (green),
+and several Spanish words in January 2018 (yellow).
+
+I tried some different methods, but did not find much interesting regarding change in word frequency
+over time (aside from the TF-IDF approach). [^fn_phack]
+When using the method discussed in the
+[_Tidy Text Mining_ book for identifying change in word usage](https://www.tidytextmining.com/twitter.html#changes-in-word-use)
+across 60-day intervals, I found
+only two non-trivial "significant" changes among the top 25% of most 
+frequently used words, which are for `user` and `tutorials`.
+(I would consider `html` and `de` trivial.) [^fn_top25pct]
+`user` has dropped off a bit since the `useR2016` conference, and `tutorials` has
+grown in usage, which is evident with the increasing length of the `tutorial` section
+in posts.
+
+[^fn_phack]:
+I think many academics face this same "issue" with their own research,
+which can tempt them to [p-hack](https://en.wikipedia.org/wiki/Data_dredging) simply 
+so that they can claim that they have deduced something significant.
+
+[^fn_top25pct]:
+I evaluate only the top 25% in order to filter out the "noise" that would appear
+for infrequent terms.
+
+
+```{r unigrams_change}
 unigrams_change <-
   unigrams %>% 
-  compute_change_at(
-    timebin = "date",
-    timefloor = "month"
+  rename(doc = date_lag60) %>% 
+  tetext::compute_change_at(
+    timebin = "doc",
+    bin = FALSE,
+    top_pct = 0.25
   )
-# unigrams_change
+unigrams_change %>% filter(adjusted_p_value <= 0.05)
+```
+
+```{r viz_unigrams_change, eval = FALSE, include = FALSE}
 viz_unigrams_change <-
   unigrams %>% 
-  visualize_change_at(
-    timebin = "date",
-    timefloor = "month",
-    color_value = params$colors_main
+  rename(doc = date_lag60) %>% 
+  mutate(doc = factor(doc)) %>% 
+  tetext::visualize_change_at(
+    timebin = "doc",
+    bin = FALSE,
+    top_pct = 0.95,
+    color = "doc",
+    # num_top = 1,
+    color_value = c("red", "green", "blue", "orange", "purple")
   ) +
-  theme(legend.position = "bottom")
+  labs(title = "Words with Most Statistically Significant Change in Usage in R Weekly Posts",
+       subtitle = "Across 60-Day Intervals",
+       caption = "Only 'user' actually has a p.value < 0.1.")
 viz_unigrams_change
 ```
 
-
+That's all I got for this subject. As I mentioned at the top, there are many of other
+great "meta" analyses like this one that are worth looking at, so definitely check
+them out!
 
