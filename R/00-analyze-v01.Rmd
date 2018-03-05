@@ -174,6 +174,16 @@ viz_time_lag30 <-
 viz_time_lag30
 ```
 
+```{r eval = FALSE, include = FALSE}
+ggsave(
+  viz_time_lag30,
+  filename = file.path("figs", "viz_time_lag30.png"),
+  units = "in",
+  width = 8,
+  height = 5
+)
+```
+
 Now, I'll do the dirty work of cleaning and parsing the text of each post.
 My function for doing so is not particularly robust, so it would need to be modified
 if being applied to another data set/GitHub repo.
@@ -327,6 +337,16 @@ viz_metrics_cnt_bypost <-
 viz_metrics_cnt_bypost
 ```
 
+```{r eval = FALSE, include = FALSE}
+ggsave(
+  viz_metrics_cnt_bypost,
+  filename = file.path("figs", "viz_metrics_cnt_bypost.png"),
+  units = "in",
+  width = 8,
+  height = 5
+)
+```
+
 It looks like there has been a correlated increase in the overall length of the posts
 (as determined by non-empty lines) and the number of links in each post.
 
@@ -353,6 +373,16 @@ viz_links_cnt_bypost <-
        subtitle = "By Type of Link") +
   viz_theme_facet
 viz_links_cnt_bypost
+```
+
+```{r eval = FALSE, include = FALSE}
+ggsave(
+  viz_links_cnt_bypost,
+  filename = file.path("figs", "viz_links_cnt_bypost.png"),
+  units = "in",
+  width = 8,
+  height = 5
+)
 ```
 
 It is evident that the increase in the number of links is not the result
@@ -411,6 +441,16 @@ viz_lines_cnt_bypost_byhead <-
 viz_lines_cnt_bypost_byhead
 ```
 
+```{r eval = FALSE, include = FALSE}
+ggsave(
+  viz_lines_cnt_bypost_byhead,
+  filename = file.path("figs", "viz_lines_cnt_bypost_byhead.png"),
+  units = "in",
+  width = 8,
+  height = 5
+)
+```
+
 The steady increase in the length of the `tutorial` section stands out.
 (I suppose the `R` community really enjoys code-walkthroughs (like this one).)
 Also, the introduction of the `new package` header about a year after the first RWeekly post
@@ -423,7 +463,7 @@ to external content should provide a more focused perspective on what
 specifically is of interest in the `R` community.
 What are the most frequently used words in these short descriptions?
 
-```{r viz_unigrams_cnts, echo = FALSE}
+```{r viz_unigrams_cnts, echo = FALSE, fig.width = 6, fig.height = 6}
 rgx_ignore <- "http|https"
   
 unigrams <-
@@ -444,6 +484,16 @@ viz_unigrams_cnts <-
   ) +
   labs(title = "Most Frequently Used Words in R Weekly Link Descriptions")
 viz_unigrams_cnts
+```
+
+```{r eval = FALSE, include = FALSE}
+ggsave(
+  viz_unigrams_cnts,
+  filename = file.path("figs", "viz_unigrams_cnts.png"),
+  units = "in",
+  width = 6,
+  height = 6
+)
 ```
 
 Some unsurprising words appear at the top of this list, such as `data` and `analysis`.
@@ -471,6 +521,16 @@ viz_unigrams_corrs <-
   ) +
   labs(title = "Network of Pairwise Correlations of Words in R Weekly Link Descriptions")
 viz_unigrams_corrs
+```
+
+```{r eval = FALSE, include = FALSE}
+ggsave(
+  viz_unigrams_corrs,
+  filename = file.path("figs", "viz_unigrams_corrs.png"),
+  units = "in",
+  width = 10,
+  height = 6
+)
 ```
 
 This visual highlights a lot of the pairwise word correlations that we might expect
@@ -549,6 +609,16 @@ viz_unigrams_tfidf_multi <-
   labs(title = "Top 5 Highest TF-IDF Words in R Weekly Link Descriptions",
        subtitle = "Across 60-Day Intervals")
 viz_unigrams_tfidf_multi
+```
+
+```{r eval = FALSE, include = FALSE}
+ggsave(
+  viz_unigrams_tfidf_multi,
+  filename = file.path("figs", "viz_unigrams_tfidf_multi.png"),
+  units = "in",
+  width = 10,
+  height = 8
+)
 ```
 
 A couple of things stand out:
